@@ -114,7 +114,7 @@ def get_video_chapters(video_url):
     print("  - 没有检测到 Chapters")
     return []
 
-def build_gemini_prompt(chapters):
+def build_gemini_prompt(chapters, transcript):
     """根据是否有 chapters 构建不同的 Gemini prompt"""
 
     if chapters:
@@ -123,10 +123,13 @@ def build_gemini_prompt(chapters):
             f"  - {int(ch['start_time'])//60:02d}:{int(ch['start_time'])%60:02d} {ch['title']}"
             for ch in chapters
         ])
-        prompt = f"""请非常详细地分析这个健身视频，用中文写出完整的总结。
+        prompt = f"""请非常详细地分析这个健身视频的文稿，用中文写出完整的总结。
 
 这个视频有以下分段（Chapters）：
 {chapters_text}
+
+以下是视频的完整字幕文稿：
+{transcript}
 
 请严格按照视频自身的 Chapters 结构来总结内容。每个 Chapter 作为一个 section。
 请按以下 JSON 格式返回：
@@ -150,7 +153,7 @@ def build_gemini_prompt(chapters):
 
 ⚠️ 严格要求：
 1. 所有内容必须用**中文**书写，包括 title、summary、content、tips、overall_advice
-2. 如果视频是英文的，必须将所有内容翻译成中文（专业术语可以中英对照，如"深蹲 (Squat)"）
+2. 如果原视频文稿是英文的，必须将所有内容翻译成中文（专业术语可以中英对照，如"深蹲 (Squat)"）
 3. sections 的数量和顺序必须严格对应上面列出的 Chapters
 4. 每个 section 的 content 至少要有 **4-6 个要点**，要详尽地总结该段落的核心知识，不要太简略
 5. content 每个要点要写成完整的句子（15-30字），不要只写几个词
@@ -158,7 +161,10 @@ def build_gemini_prompt(chapters):
 7. 请确保返回有效的 JSON，只返回 JSON，不要有其他内容"""
     else:
         # 无 chapters：让 Gemini 自行判断视频结构
-        prompt = """请非常详细地分析这个健身视频，用中文写出完整的总结。
+        prompt = f"""请非常详细地分析这个健身视频的文稿，用中文写出完整的总结。
+
+以下是视频的完整字幕文稿：
+{transcript}
 
 请根据视频的实际内容结构来组织总结。
 - 如果视频是按多个不同的训练动作来组织的，就按动作分段
@@ -168,25 +174,25 @@ def build_gemini_prompt(chapters):
 请严格按以下 JSON 格式返回：
 
 ```json
-{
+{{
   "title": "视频的中文标题（如果原标题是英文，请翻译成中文）",
   "summary": "视频的详细概述（2-3句话，说清楚视频在讲什么、适合什么人群）",
   "sections": [
-    {
+    {{
       "title": "段落的中文标题（专业术语可以中英对照，如：深蹲 (Squat)）",
       "time_str": "MM:SS",
       "timestamp": 秒数,
       "content": ["详细要点1", "详细要点2", "详细要点3", "详细要点4"],
       "tips": "注意事项或补充说明（如果有的话）"
-    }
+    }}
   ],
   "overall_advice": "整体训练建议或总结（2-3句话）"
-}
+}}
 ```
 
 ⚠️ 严格要求：
 1. 所有内容必须用**中文**书写，包括 title、summary、content、tips、overall_advice
-2. 如果视频是英文的，必须将所有内容翻译成中文（专业术语可以中英对照，如"深蹲 (Squat)"）
+2. 如果原视频文稿是英文的，必须将所有内容翻译成中文（专业术语可以中英对照，如"深蹲 (Squat)"）
 3. 每个 section 的 content 至少要有 **4-6 个要点**，要详尽地总结该段落的核心知识，不要太简略
 4. content 每个要点要写成完整的句子（15-30字），不要只写几个词
 5. time_str 格式为 MM:SS（如 01:30），timestamp 为对应的总秒数（如 90）
@@ -194,59 +200,51 @@ def build_gemini_prompt(chapters):
 
     return prompt
 
-def analyze_with_gemini(video_path, chapters):
-    """使用 Gemini API 分析本地视频文件"""
+def analyze_with_gemini(video_path, chapters, subtitles):
+    """使用 Gemini API 分析字幕文本内容"""
     try:
-        import time
         from google import genai
     except ImportError:
         print("  ⚠️ [GEMINI 失败原因] google-genai 包未安装")
         print("  修复方法: pip3 install --break-system-packages google-genai")
-        print("  → 将降级到字幕分析模式")
+        print("  → 将降级到纯本地 Regex 字幕分析模式")
         return None
 
     api_key = os.environ.get('GEMINI_API_KEY')
     if not api_key:
         print("  ⚠️ [GEMINI 失败原因] 环境变量 GEMINI_API_KEY 未设置")
         print("  修复方法: export GEMINI_API_KEY='your-api-key'")
-        print("  → 将降级到字幕分析模式")
+        print("  → 将降级到纯本地 Regex 字幕分析模式")
         return None
     else:
         print(f"  ✓ GEMINI_API_KEY 已设置 (前8位: {api_key[:8]}...)")
 
-    if not Path(video_path).exists():
-        print(f"  ⚠️ [GEMINI 失败原因] 视频文件不存在: {video_path}")
-        print("  → 将降级到字幕分析模式")
-        return None
-    else:
-        file_size_mb = Path(video_path).stat().st_size / (1024 * 1024)
-        print(f"  ✓ 视频文件存在: {video_path} ({file_size_mb:.1f} MB)")
+    if not subtitles:
+        print("  ⚠️ [GEMINI 失败原因] 没有提供字幕文本进行分析")
+        print("  → 我们将尝试回退到上传原视频进行分析的昂贵模式...")
+        return fallback_analyze_video_with_gemini(video_path, chapters)
 
-    print(f"  准备使用 Gemini 分析视频 (本地上传方式)...")
+    print(f"  准备使用 Gemini 分析视频转写文稿 (低 Token 消耗模式)...")
+    
+    # 将字幕合并为长文本，带上时间戳增强上下文
+    transcript_lines = []
+    for sub in subtitles:
+        if sub['text'].strip():
+            transcript_lines.append(f"[{sub['time_str']}] {sub['text']}")
+    transcript = "\n".join(transcript_lines)
+    
+    print(f"  ✓ 整理文稿完成，共 {len(transcript)} 个字符")
 
-    prompt = build_gemini_prompt(chapters)
+    prompt = build_gemini_prompt(chapters, transcript)
 
     client = genai.Client(api_key=api_key)
-    uploaded_file = None
 
     try:
-        print("  - 正在上传视频到 Gemini 服务器...")
-        uploaded_file = client.files.upload(file=video_path)
-        print(f"  ✓ 上传完成 (URI: {uploaded_file.uri})")
-
-        # 等待视频在服务器端处理完成
-        print("  - 等待视频处理...", end="", flush=True)
-        while uploaded_file.state.name == "PROCESSING":
-            print(".", end="", flush=True)
-            time.sleep(2)
-            uploaded_file = client.files.get(name=uploaded_file.name)
-        if uploaded_file.state.name == "FAILED":
-            raise Exception("Gemini 无法处理该视频。")
-        print("\n  ✓ 视频准备就绪，开始分析内容...")
-
+        print("  - 正在请求 Gemini API 分析文稿内容...")
+        # 因为现在只是传文本，改用 gemini-2.5-flash 会非常快且便宜
         response = client.models.generate_content(
             model='gemini-2.5-flash',
-            contents=[uploaded_file, prompt]
+            contents=prompt
         )
 
         result_text = response.text
@@ -276,11 +274,70 @@ def analyze_with_gemini(video_path, chapters):
         with open('/tmp/gemini_analysis_raw.txt', 'w', encoding='utf-8') as f:
             f.write(result_text)
         print(f"  原始结果已保存到 /tmp/gemini_analysis_raw.txt")
-        print(f"  → 将降级到字幕分析模式")
+        print(f"  → 将降级到纯本地 Regex 字幕分析模式")
         return None
     except Exception as e:
         print(f"  ⚠️ [GEMINI 失败原因] {type(e).__name__}: {e}")
-        print(f"  → 将降级到字幕分析模式")
+        print(f"  → 将降级到纯本地 Regex 字幕分析模式")
+        return None
+
+def fallback_analyze_video_with_gemini(video_path, chapters):
+    """(回退方案) 如果完全没有字幕，则上传完整原视频让 Gemini 分析 (消耗极大)"""
+    try:
+        import time
+        from google import genai
+        api_key = os.environ.get('GEMINI_API_KEY')
+        client = genai.Client(api_key=api_key)
+    except:
+        return None
+
+    if not Path(video_path).exists():
+        print(f"  ⚠️ 视频文件不存在: {video_path}")
+        return None
+    else:
+        file_size_mb = Path(video_path).stat().st_size / (1024 * 1024)
+        print(f"  ✓ 视频文件存在: {video_path} ({file_size_mb:.1f} MB)")
+
+    print(f"  ⚠️ 将使用昂贵的完整的视频上传模式...")
+
+    # 在Fallback纯视频分析下，transcript 为空
+    prompt = build_gemini_prompt(chapters, transcript="（无字幕，请直接基于视频画面和原生音频分析）")
+
+    uploaded_file = None
+    try:
+        print("  - 正在上传视频到 Gemini 服务器...")
+        uploaded_file = client.files.upload(file=video_path)
+        print(f"  ✓ 上传完成 (URI: {uploaded_file.uri})")
+
+        print("  - 等待视频处理...", end="", flush=True)
+        while uploaded_file.state.name == "PROCESSING":
+            print(".", end="", flush=True)
+            time.sleep(2)
+            uploaded_file = client.files.get(name=uploaded_file.name)
+        if uploaded_file.state.name == "FAILED":
+            raise Exception("Gemini 无法处理该视频。")
+        print("\n  ✓ 视频准备就绪，开始分析内容...")
+
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[uploaded_file, prompt]
+        )
+
+        result_text = response.text
+        
+        json_match = re.search(r'```json\s*(.+?)\s*```', result_text, re.DOTALL)
+        if json_match:
+            result_text = json_match.group(1)
+        else:
+            json_match = re.search(r'\{.+\}', result_text, re.DOTALL)
+            if json_match:
+                result_text = json_match.group(0)
+
+        data = json.loads(result_text)
+        return data
+
+    except Exception as e:
+        print(f"  ⚠️ [GEMINI 视频分析失败] {e}")
         return None
     finally:
         if uploaded_file:
@@ -824,9 +881,13 @@ def main():
     video_files = [f for f in video_files if f.suffix in ['.mp4', '.webm', '.mkv'] and 'srt' not in f.name]
     video_path = str(video_files[0]) if video_files else "/tmp/video.mp4"
 
-    # 6. Gemini 分析（传入 chapters 信息）
+    # 新增流程：先解析字幕，如果能拿到字幕就丢给Gemini纯文本分析（省token）
+    print("\n获取视频文稿(Subtitles)...")
+    subtitles = parse_subtitles()
+
+    # 6. Gemini 分析（传入 chapters 和 subtitles 信息）
     print("\n尝试 Gemini 视频分析...")
-    gemini_data = analyze_with_gemini(video_path, chapters)
+    gemini_data = analyze_with_gemini(video_path, chapters, subtitles)
 
     summary = ""
     overall_advice = ""
@@ -839,10 +900,11 @@ def main():
         if gemini_data.get('title') and video_info:
             video_info['title'] = gemini_data['title']
     else:
-        # 7. 降级到字幕分析
-        print("\n降级到字幕分析...")
-        print("解析字幕...")
-        subtitles = parse_subtitles()
+        # 7. 降级到纯正则字幕分析（最差情况，不再消耗API）
+        print("\n降级到纯本地匹配模式...")
+        if not subtitles:
+            print("解析字幕...")
+            subtitles = parse_subtitles()
         print("\n提取段落信息...")
         sections = extract_sections_from_subtitles(subtitles)
 
