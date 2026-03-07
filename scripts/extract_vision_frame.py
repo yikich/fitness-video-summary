@@ -49,7 +49,7 @@ def analyze_frame_with_vision(image_path, action_name):
   "reason": "评分理由"
 }}"""
 
-        # 调用 Claude API
+        # 调用 Claude 兼容视觉 API
         payload = {
             "model": "claude-opus-4-6",
             "max_tokens": 500,
@@ -71,12 +71,17 @@ def analyze_frame_with_vision(image_path, action_name):
                 ]
             }]
         }
-        
+
+        api_key = os.environ.get('CODEFLOW_API_KEY')
+        api_base = os.environ.get('CODEFLOW_API_BASE', 'https://codeflow.asia')
+        if not api_key:
+            return False, 0, '未设置 CODEFLOW_API_KEY'
+
         # 使用 curl 调用 API
         result = subprocess.run(
-            ['curl', '-s', 'https://codeflow.asia/v1/messages',
+            ['curl', '-s', f'{api_base}/v1/messages',
              '-H', 'Content-Type: application/json',
-             '-H', 'x-api-key: REMOVED_API_KEY',
+             '-H', f'x-api-key: {api_key}',
              '-H', 'anthropic-version: 2023-06-01',
              '-d', json.dumps(payload)],
             capture_output=True,
