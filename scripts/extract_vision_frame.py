@@ -72,10 +72,10 @@ def analyze_frame_with_vision(image_path, action_name):
             }]
         }
 
-        api_key = os.environ.get('CODEFLOW_API_KEY')
-        api_base = os.environ.get('CODEFLOW_API_BASE', 'https://codeflow.asia')
+        api_key = os.environ.get('VISION_API_KEY')
+        api_base = os.environ.get('VISION_API_BASE', 'https://your-vision-api.example.com')
         if not api_key:
-            return False, 0, '未设置 CODEFLOW_API_KEY'
+            return False, 0, '未设置 VISION_API_KEY'
 
         # 使用 curl 调用 API
         result = subprocess.run(

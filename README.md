@@ -1,113 +1,133 @@
 # fitness-video-summary
 
-将 YouTube 健身教学视频总结为结构化 HTML 文档的 OpenClaw skill。
+An OpenClaw skill for turning YouTube fitness videos into structured, readable summary pages.
 
-它会尽量按视频原本结构来整理内容：
-- 如果视频有 **YouTube Chapters**，优先按 Chapters 总结
-- 如果没有 Chapters，则根据内容逻辑自动分段
-- 为每个段落提取候选截图，并选择更有代表性的画面
-- 输出带有**可点击时间戳**的单文件 HTML，方便回看原视频
+It is designed for workout tutorials, technique breakdowns, training theory videos, and long-form fitness content. Instead of dumping raw notes, it tries to preserve the original structure of the video and generate a clean HTML report with clickable timestamps and representative screenshots.
 
-## 适用场景
+## What it does
 
-适合这类视频：
-- 健身动作教学
-- 训练计划解析
-- 技术讲解 / 动作纠错
-- 训练原理、恢复、热身、拉伸类内容
-- 健身博主长视频总结
+- Detects **YouTube Chapters** and uses them as the preferred structure when available
+- Falls back to automatic sectioning when no chapters exist
+- Uses subtitles and Gemini to generate a structured Chinese summary
+- Extracts multiple candidate frames for each section instead of blindly taking the first frame
+- Produces a **single-file HTML report** with embedded images and clickable links back to the source video
+- Can optionally send the generated file through macOS Mail
 
-## 仓库内容
+## Good fit for
 
-- `SKILL.md`：skill 说明与使用规范
-- `scripts/summarize_fitness_video.py`：主脚本，负责下载、转写分析、分段和生成 HTML
-- `scripts/extract_best_frame.py`：基础多帧采样截图
-- `scripts/extract_smart_frame.py`：基于 OCR 的截图选择
-- `scripts/extract_vision_frame.py`：基于视觉模型的截图选择
+This skill works especially well for:
 
-## 工作流程
+- fitness tutorials
+- exercise breakdowns
+- mobility / stretching / warm-up videos
+- technique correction videos
+- training theory, recovery, and programming content
+- long YouTube videos that are worth reviewing later in a structured format
 
-1. 使用 `yt-dlp` 获取视频信息和 Chapters
-2. 下载视频与字幕到本地临时目录
-3. 优先用 Gemini 基于字幕/视频进行结构化总结
-4. 如果失败，则回退到本地字幕分析
-5. 为每个 section 提取多张候选截图
-6. 生成单文件 HTML，并把截图内嵌为 base64
-7. 保存到桌面，并可选通过 macOS Mail 发送
+## Repository structure
 
-## 依赖
+- `SKILL.md` — OpenClaw skill definition and workflow guidance
+- `scripts/summarize_fitness_video.py` — main script for downloading, parsing, summarizing, and generating HTML
+- `scripts/extract_best_frame.py` — simple multi-frame sampling helper
+- `scripts/extract_smart_frame.py` — OCR-assisted frame selection helper
+- `scripts/extract_vision_frame.py` — vision-model-based frame selection helper
 
-建议环境：macOS + Python 3.11+
+## How it works
 
-需要安装：
+1. Fetch video metadata and detect YouTube Chapters with `yt-dlp`
+2. Download the video and subtitles locally
+3. Prefer Gemini-based structured analysis
+4. Fall back to local subtitle parsing if model analysis fails
+5. Sample multiple candidate screenshots for each section
+6. Generate a self-contained HTML file with embedded images
+7. Save the result to the desktop
+8. Optionally send the output via macOS Mail
+
+## Requirements
+
+Recommended environment:
+
+- macOS
+- Python 3.11+
+- `yt-dlp`
+- `ffmpeg`
+- `tesseract`
+- `google-genai`
+
+Install example:
 
 ```bash
 brew install yt-dlp ffmpeg tesseract
 pip3 install --break-system-packages google-genai
 ```
 
-## 环境变量
+## Environment variables
 
-### 必需
+### Required
+
+Gemini is used for the main structured summary flow:
 
 ```bash
 export GEMINI_API_KEY="your-gemini-api-key"
 ```
 
-### 可选（视觉截图分析）
+### Optional
+
+If you want to use the vision-based frame selection helper, configure your own compatible API endpoint and key:
 
 ```bash
-export CODEFLOW_API_KEY="your-codeflow-api-key"
-export CODEFLOW_API_BASE="https://codeflow.asia"
+export VISION_API_KEY="your-api-key"
+export VISION_API_BASE="https://your-vision-api.example.com"
 ```
 
-如果未设置 `CODEFLOW_API_KEY`，视觉截图分析脚本会返回失败，你可以改用其他截图脚本或让主流程自动回退。
+Notes:
 
-## 使用方式
+- `VISION_API_BASE` should point to a service compatible with the request format used in `scripts/extract_vision_frame.py`
+- If `VISION_API_KEY` is not set, the vision frame helper will fail and you should fall back to the other screenshot strategies
+- This repository does **not** include any real API credentials
 
-直接运行主脚本：
+## Usage
+
+Run the main script directly:
 
 ```bash
 python3 scripts/summarize_fitness_video.py "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
-输出文件默认保存在：
+By default, the output is saved to:
 
 ```bash
 ~/Desktop/[视频标题]_训练总结.html
 ```
 
-## 设计原则
+## Design principles
 
-- 尊重视频原始结构，不强行套动作列表模板
-- 有 Chapters 时优先按 Chapters 组织
-- 优先本地下载后再做分析，避免直接把 YouTube URL 丢给模型造成幻觉
-- 截图不能只取起始帧，应进行多候选筛选
-- 最终 HTML 应可离线打开，图片不依赖临时路径
+- Respect the creator’s original structure instead of forcing every video into the same template
+- Prefer YouTube Chapters when they exist
+- Download locally before analysis instead of sending the raw YouTube URL directly to the model
+- Sample multiple screenshots per section instead of relying on a single timestamp frame
+- Generate a portable HTML output that still works after temporary files are gone
 
-## 已清理的敏感信息
+## Sensitive information cleanup
 
-这个仓库在整理发布前，已移除一处**硬编码 API key**：
+Before publishing this repository, one hardcoded API key was removed from:
 
-- `scripts/extract_vision_frame.py` 中原本写死的 `x-api-key`
+- `scripts/extract_vision_frame.py`
 
-现在已改为通过环境变量读取：
+That logic now reads configuration from user-supplied environment variables instead:
 
-- `CODEFLOW_API_KEY`
-- `CODEFLOW_API_BASE`（可选）
+- `VISION_API_KEY`
+- `VISION_API_BASE`
 
-这样做的目的：
-- 避免把真实密钥提交到 GitHub
-- 让仓库可以公开分享
-- 让不同环境用各自的凭证配置
+This keeps the repository safe to publish while still allowing users to plug in their own API provider.
 
-## 注意事项
+## Limitations
 
-- `send_email()` 目前使用 macOS `Mail` + AppleScript，非 macOS 环境需要自行替换
-- Gemini 配额不足时会自动回退，但结果质量可能下降
-- 自动字幕本身可能带来错字或误识别
-- 视觉截图质量会受视频清晰度、字幕遮挡和动作节奏影响
+- `send_email()` currently depends on macOS Mail + AppleScript
+- Automatic subtitles may contain transcription errors
+- If Gemini quota is exhausted, fallback mode may produce lower-quality results
+- Screenshot quality still depends on video clarity, pacing, subtitle overlays, and the chosen frame selection strategy
 
 ## License
 
-暂未指定。若准备公开给他人使用，建议补充 MIT 或 Apache-2.0。
+No license has been added yet. If you plan to share or reuse this publicly, adding an MIT license would be a sensible default.
