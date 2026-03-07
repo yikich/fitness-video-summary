@@ -20,6 +20,30 @@ from pathlib import Path
 from datetime import datetime
 
 SCRIPT_DIR = Path(__file__).parent
+ENV_FILE = SCRIPT_DIR.parent / ".env"
+
+
+def load_env_file(env_path):
+    """从本地 .env 文件加载环境变量（仅填充当前未设置的键）"""
+    if not env_path.exists():
+        return
+    try:
+        with open(env_path, 'r', encoding='utf-8') as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                    value = value[1:-1]
+                os.environ.setdefault(key, value)
+    except Exception as e:
+        print(f"警告: 读取 .env 失败: {e}")
+
+
+load_env_file(ENV_FILE)
 
 def clean_temp_files():
     """清理临时文件"""
@@ -123,7 +147,7 @@ def build_gemini_prompt(chapters, transcript):
             f"  - {int(ch['start_time'])//60:02d}:{int(ch['start_time'])%60:02d} {ch['title']}"
             for ch in chapters
         ])
-        prompt = f"""请非常详细地分析这个健身视频的文稿，用中文写出完整的总结。
+        prompt = f"""请详细分析这个健身视频的文稿，并用自然、准确的中文写出完整总结。
 
 这个视频有以下分段（Chapters）：
 {chapters_text}
@@ -132,6 +156,7 @@ def build_gemini_prompt(chapters, transcript):
 {transcript}
 
 请严格按照视频自身的 Chapters 结构来总结内容。每个 Chapter 作为一个 section。
+中文表达可以适度润色，让总结更清晰易读，但必须忠于原文语义，不要补充视频里没有明确提到的信息。
 请按以下 JSON 格式返回：
 
 ```json
@@ -151,17 +176,18 @@ def build_gemini_prompt(chapters, transcript):
 }}
 ```
 
-⚠️ 严格要求：
+⚠️ 要求：
 1. 所有内容必须用**中文**书写，包括 title、summary、content、tips、overall_advice
-2. 如果原视频文稿是英文的，必须将所有内容翻译成中文（专业术语可以中英对照，如"深蹲 (Squat)"）
+2. 如果原视频文稿是英文的，请翻译成中文；专业术语可以中英对照，如"深蹲 (Squat)"
 3. sections 的数量和顺序必须严格对应上面列出的 Chapters
-4. 每个 section 的 content 至少要有 **4-6 个要点**，要详尽地总结该段落的核心知识，不要太简略
-5. content 每个要点要写成完整的句子（15-30字），不要只写几个词
-6. time_str 格式为 MM:SS（如 01:30），timestamp 为对应的总秒数（如 90）
-7. 请确保返回有效的 JSON，只返回 JSON，不要有其他内容"""
+4. 可以适度润色中文表达，但不要加入原视频没有明确提到的训练建议、原因解释或额外结论
+5. 每个 section 的 content 至少要有 **4-6 个要点**，要尽量完整覆盖该段落的核心信息
+6. content 每个要点尽量写成完整句子，但不要为了凑长度而扩写
+7. time_str 格式为 MM:SS（如 01:30），timestamp 为对应的总秒数（如 90）
+8. 请确保返回有效的 JSON，只返回 JSON，不要有其他内容"""
     else:
         # 无 chapters：让 Gemini 自行判断视频结构
-        prompt = f"""请非常详细地分析这个健身视频的文稿，用中文写出完整的总结。
+        prompt = f"""请详细分析这个健身视频的文稿，并用自然、准确的中文写出完整总结。
 
 以下是视频的完整字幕文稿：
 {transcript}
@@ -170,6 +196,7 @@ def build_gemini_prompt(chapters, transcript):
 - 如果视频是按多个不同的训练动作来组织的，就按动作分段
 - 如果视频是围绕一个主题展开讲解的（比如某个动作的技术分析、训练原理等），就按视频的逻辑结构分段
 - 不要强行按"动作1、动作2"来拆分，要尊重视频本身的叙述结构
+- 中文表达可以适度润色，但不要补充视频里没有明确提到的信息
 
 请严格按以下 JSON 格式返回：
 
@@ -190,15 +217,141 @@ def build_gemini_prompt(chapters, transcript):
 }}
 ```
 
-⚠️ 严格要求：
+⚠️ 要求：
 1. 所有内容必须用**中文**书写，包括 title、summary、content、tips、overall_advice
-2. 如果原视频文稿是英文的，必须将所有内容翻译成中文（专业术语可以中英对照，如"深蹲 (Squat)"）
-3. 每个 section 的 content 至少要有 **4-6 个要点**，要详尽地总结该段落的核心知识，不要太简略
-4. content 每个要点要写成完整的句子（15-30字），不要只写几个词
-5. time_str 格式为 MM:SS（如 01:30），timestamp 为对应的总秒数（如 90）
-6. 请确保返回有效的 JSON，只返回 JSON，不要有其他内容"""
+2. 如果原视频文稿是英文的，请翻译成中文；专业术语可以中英对照，如"深蹲 (Squat)"
+3. 可以适度润色中文表达，但不要加入原视频没有明确提到的训练建议、原因解释或额外结论
+4. 每个 section 的 content 至少要有 **4-6 个要点**，要尽量完整覆盖该段落的核心信息
+5. content 每个要点尽量写成完整句子，但不要为了凑长度而扩写
+6. time_str 格式为 MM:SS（如 01:30），timestamp 为对应的总秒数（如 90）
+7. 请确保返回有效的 JSON，只返回 JSON，不要有其他内容"""
 
     return prompt
+
+
+def _extract_json_payload(result_text):
+    """从模型返回文本中尽量稳妥地提取 JSON 文本"""
+    if not result_text:
+        return ""
+
+    cleaned = result_text.strip()
+    fenced = re.search(r'```(?:json)?\s*(.+?)\s*```', cleaned, re.DOTALL | re.IGNORECASE)
+    if fenced:
+        cleaned = fenced.group(1).strip()
+
+    start = cleaned.find('{')
+    end = cleaned.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        cleaned = cleaned[start:end + 1]
+
+    cleaned = re.sub(r',\s*([}\]])', r'\1', cleaned)
+    return cleaned.strip()
+
+
+def _parse_model_json(result_text):
+    """解析模型返回的 JSON，必要时做轻微容错修复"""
+    payload = _extract_json_payload(result_text)
+    if not payload:
+        raise json.JSONDecodeError('empty model response', result_text or '', 0)
+    return json.loads(payload), payload
+
+
+def build_translation_prompt(video_title, sections, chapters=None, summary='', overall_advice=''):
+    """为降级路径构建受限翻译/润色 prompt"""
+    input_data = {
+        "video_title": video_title,
+        "summary": summary or "",
+        "sections": sections,
+        "overall_advice": overall_advice or ""
+    }
+    if chapters:
+        input_data["chapters"] = [
+            {
+                "title": ch.get("title", ""),
+                "start_time": int(ch.get("start_time", 0)),
+                "end_time": int(ch.get("end_time", 0)) if ch.get("end_time") is not None else None,
+            }
+            for ch in chapters
+        ]
+
+    return f"""请把下面这份健身视频总结素材整理成自然、准确的中文总结，允许适度润色中文表达，但必须严格忠于原文语义。
+
+要求：
+1. 只根据输入素材翻译和整理，不要补充视频里没有明确提到的新观点、新建议、新结论。
+2. 如果原文信息不足、字幕破碎、上下文不完整或表达含糊，请使用保守模式：只做简短、稳妥的中文概括，不要擅自推断或硬凑完整建议。
+3. 可以把英文术语翻译成中文，必要时保留中英对照。
+4. 如果提供了 chapters，sections 的数量、顺序、时间戳必须严格对应 chapters。
+5. 对 section title、content、tips 的润色要以“更清晰”而不是“更丰富”为目标；不要为了文采增加原文没有的信息。
+6. 输出必须是合法 JSON，不要 markdown 代码块，不要额外解释。
+7. 所有字段都用中文；若某字段确实没有内容，请返回空字符串或空数组。
+
+请返回这个 JSON 结构：
+{{
+  "title": "中文标题",
+  "summary": "中文概述",
+  "sections": [
+    {{
+      "title": "中文段落标题",
+      "time_str": "MM:SS",
+      "timestamp": 0,
+      "content": ["中文要点1", "中文要点2"],
+      "tips": "中文补充说明"
+    }}
+  ],
+  "overall_advice": "中文整体建议"
+}}
+
+输入素材：
+{json.dumps(input_data, ensure_ascii=False, indent=2)}
+"""
+
+
+def translate_and_polish_sections(video_info, sections, chapters=None, summary='', overall_advice=''):
+    """对降级路径产物做受限翻译+润色，避免最终输出英文"""
+    if not sections:
+        return None
+
+    try:
+        from google import genai
+    except ImportError:
+        print('  - google-genai 未安装，跳过降级翻译润色')
+        return None
+
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        print('  - 未设置 GEMINI_API_KEY，跳过降级翻译润色')
+        return None
+
+    prompt = build_translation_prompt(
+        video_info.get('title', '未知标题'),
+        sections,
+        chapters=chapters,
+        summary=summary,
+        overall_advice=overall_advice,
+    )
+
+    result_text = ''
+    try:
+        print('  - 正在执行降级后的中文翻译与润色...')
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        result_text = response.text or ''
+        data, payload = _parse_model_json(result_text)
+        with open('/tmp/gemini_translation_polish.txt', 'w', encoding='utf-8') as f:
+            f.write(result_text)
+        print(f"  ✓ 翻译润色完成，得到 {len(data.get('sections', []))} 个中文段落")
+        return data
+    except Exception as e:
+        print(f'  - 降级翻译润色失败: {e}')
+        try:
+            with open('/tmp/gemini_translation_polish_raw.txt', 'w', encoding='utf-8') as f:
+                f.write(result_text)
+        except Exception:
+            pass
+        return None
 
 def analyze_with_gemini(video_path, chapters, subtitles):
     """使用 Gemini API 分析字幕文本内容"""
@@ -225,54 +378,45 @@ def analyze_with_gemini(video_path, chapters, subtitles):
         return fallback_analyze_video_with_gemini(video_path, chapters)
 
     print(f"  准备使用 Gemini 分析视频转写文稿 (低 Token 消耗模式)...")
-    
-    # 将字幕合并为长文本，带上时间戳增强上下文
+
     transcript_lines = []
     for sub in subtitles:
         if sub['text'].strip():
             transcript_lines.append(f"[{sub['time_str']}] {sub['text']}")
     transcript = "\n".join(transcript_lines)
-    
+
     print(f"  ✓ 整理文稿完成，共 {len(transcript)} 个字符")
 
     prompt = build_gemini_prompt(chapters, transcript)
-
     client = genai.Client(api_key=api_key)
 
     try:
         print("  - 正在请求 Gemini API 分析文稿内容...")
-        # 因为现在只是传文本，改用 gemini-2.5-flash 会非常快且便宜
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=prompt
         )
 
-        result_text = response.text
+        result_text = response.text or ''
         print(f"  ✓ Gemini 分析完成，返回 {len(result_text)} 字符")
 
-        # 提取 JSON
-        json_match = re.search(r'```json\s*(.+?)\s*```', result_text, re.DOTALL)
-        if json_match:
-            result_text = json_match.group(1)
-        else:
-            json_match = re.search(r'\{.+\}', result_text, re.DOTALL)
-            if json_match:
-                result_text = json_match.group(0)
-
-        data = json.loads(result_text)
+        data, payload = _parse_model_json(result_text)
         sections = data.get('sections', [])
         print(f"  ✓ 解析到 {len(sections)} 个段落")
 
-        # 保存原始分析结果
         with open('/tmp/gemini_analysis.txt', 'w', encoding='utf-8') as f:
-            f.write(response.text)
+            f.write(result_text)
 
         return data
 
     except json.JSONDecodeError as e:
         print(f"  ⚠️ [GEMINI 失败原因] 返回的 JSON 解析失败: {e}")
+        try:
+            payload = _extract_json_payload(result_text)
+        except Exception:
+            payload = result_text
         with open('/tmp/gemini_analysis_raw.txt', 'w', encoding='utf-8') as f:
-            f.write(result_text)
+            f.write(payload or result_text)
         print(f"  原始结果已保存到 /tmp/gemini_analysis_raw.txt")
         print(f"  → 将降级到纯本地 Regex 字幕分析模式")
         return None
@@ -299,8 +443,6 @@ def fallback_analyze_video_with_gemini(video_path, chapters):
         print(f"  ✓ 视频文件存在: {video_path} ({file_size_mb:.1f} MB)")
 
     print(f"  ⚠️ 将使用昂贵的完整的视频上传模式...")
-
-    # 在Fallback纯视频分析下，transcript 为空
     prompt = build_gemini_prompt(chapters, transcript="（无字幕，请直接基于视频画面和原生音频分析）")
 
     uploaded_file = None
@@ -323,17 +465,10 @@ def fallback_analyze_video_with_gemini(video_path, chapters):
             contents=[uploaded_file, prompt]
         )
 
-        result_text = response.text
-        
-        json_match = re.search(r'```json\s*(.+?)\s*```', result_text, re.DOTALL)
-        if json_match:
-            result_text = json_match.group(1)
-        else:
-            json_match = re.search(r'\{.+\}', result_text, re.DOTALL)
-            if json_match:
-                result_text = json_match.group(0)
-
-        data = json.loads(result_text)
+        result_text = response.text or ''
+        data, payload = _parse_model_json(result_text)
+        with open('/tmp/gemini_analysis_video_fallback.txt', 'w', encoding='utf-8') as f:
+            f.write(result_text)
         return data
 
     except Exception as e:
@@ -413,7 +548,9 @@ def _merge_subtitle_texts(subtitles, start_ts, end_ts, max_points=6):
     texts = []
     seen = set()
     for sub in subtitles:
-        if start_ts <= sub["timestamp"] < end_ts:
+        ts = sub["timestamp"]
+        in_range = start_ts <= ts if end_ts is None else start_ts <= ts < end_ts
+        if in_range:
             text = sub["text"].strip()
             # 去掉重复的文本（自动字幕经常有重复）
             normalized = re.sub(r'\s+', ' ', text.lower())
@@ -440,9 +577,29 @@ def _merge_subtitle_texts(subtitles, start_ts, end_ts, max_points=6):
     return merged[:max_points]
 
 
-def extract_sections_from_subtitles(subtitles):
+def extract_sections_from_subtitles(subtitles, chapters=None):
     """从字幕中提取段落信息（降级方案）"""
     sections = []
+
+    if chapters:
+        print("  - 检测到 Chapters，降级路径将严格按 Chapters 分段...")
+        for ch in chapters:
+            start_ts = int(ch.get('start_time', 0) or 0)
+            end_raw = ch.get('end_time')
+            end_ts = int(end_raw) if end_raw is not None else None
+            segment_content = _merge_subtitle_texts(subtitles, start_ts, end_ts)
+            if not segment_content:
+                segment_content = ["（该章节未提取到可用字幕）"]
+            sections.append({
+                "title": ch.get('title', f"章节 {len(sections) + 1}"),
+                "timestamp": start_ts,
+                "time_str": f"{start_ts // 3600:02d}:{(start_ts % 3600) // 60:02d}:{start_ts % 60:02d}",
+                "time_str_display": f"{start_ts // 60:02d}:{start_ts % 60:02d}",
+                "content": segment_content,
+                "tips": ""
+            })
+        print(f"✓ 按 Chapters 识别了 {len(sections)} 个段落")
+        return sections
 
     exercise_keywords = [
         r'第[一二三四五六七八九十\d]+个动作',
@@ -468,9 +625,8 @@ def extract_sections_from_subtitles(subtitles):
                     sections[-1]["content"].append(subtitles[j]["text"])
                 break
 
-    # 如果没有找到明确的标记，按时间间隔分段，并从字幕提取真实内容
     if len(sections) < 2:
-        print("  - 未找到明确段落标记，按时间分段并提取字幕内容...")
+        print("  - 未找到明确段落标记，按时间分段并提取真实字幕内容...")
         if not subtitles:
             print("  ⚠️ 没有字幕数据可用，生成空内容")
             return [{
@@ -488,13 +644,8 @@ def extract_sections_from_subtitles(subtitles):
         for i in range(num_segments):
             start_ts = int((duration / num_segments) * i)
             end_ts = int((duration / num_segments) * (i + 1))
-
-            # 从该时间段的字幕中提取真实文字内容
             segment_content = _merge_subtitle_texts(subtitles, start_ts, end_ts)
-
-            # 尝试从第一条内容生成更有意义的标题
             if segment_content:
-                # 取第一句作为标题（截断到合理长度）
                 first_text = segment_content[0]
                 title = first_text[:40] + ("..." if len(first_text) > 40 else "")
             else:
@@ -790,10 +941,22 @@ def generate_html(video_info, sections, video_url, summary="", overall_advice=""
 """
     return html
 
+def _clean_output_title(video_title, max_len=28):
+    """清洗输出文件标题，避免桌面文件名过长或过乱"""
+    cleaned = re.sub(r'[\\/:*?"<>|]+', ' ', video_title)
+    cleaned = re.sub(r'[^\w\s\-\u4e00-\u9fff]', ' ', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip(' .-_')
+    if not cleaned:
+        cleaned = '健身视频总结'
+    if len(cleaned) > max_len:
+        cleaned = cleaned[:max_len].rstrip(' .-_')
+    return cleaned
+
+
 def save_html(html, video_title):
     """保存HTML文件到桌面"""
     desktop = Path.home() / "Desktop"
-    safe_title = re.sub(r'[^\w\s-]', '', video_title)[:50]
+    safe_title = _clean_output_title(video_title)
     filename = f"{safe_title}_训练总结.html"
     filepath = desktop / filename
 
@@ -808,7 +971,7 @@ def send_email(html_path, video_title, video_url):
     recipient = os.environ.get('SUMMARY_EMAIL_TO', '').strip()
     if not recipient:
         print("- 未设置 SUMMARY_EMAIL_TO，跳过邮件发送")
-        return False
+        return False, recipient
 
     print(f"正在发送邮件到: {recipient}")
 
@@ -835,10 +998,23 @@ end tell
 
     if result.returncode == 0:
         print("✓ 邮件发送成功")
-        return True
+        return True, recipient
     else:
         print(f"警告: 邮件发送失败\n{result.stderr}")
-        return False
+        return False, recipient
+
+def print_run_summary(structure_mode, screenshot_mode, chapters_detected, html_path, email_sent=False, email_recipient=""):
+    """打印标准化结果摘要，供 agent 最终回复复用"""
+    print("\n结果摘要:")
+    print(f"- 结构化分析: {structure_mode}")
+    print(f"- 截图选择: {screenshot_mode}")
+    print(f"- Chapters: {'检测到' if chapters_detected else '未检测到'}")
+    print(f"- 输出文件: {html_path}")
+    if email_recipient:
+        print(f"- 邮件发送: {'成功' if email_sent else '失败'} ({email_recipient})")
+    else:
+        print("- 邮件发送: 已跳过")
+
 
 def main():
     if len(sys.argv) < 2:
@@ -893,6 +1069,8 @@ def main():
 
     summary = ""
     overall_advice = ""
+    structure_mode = "Gemini"
+    screenshot_mode = "视觉模型优先（失败时回退规则截图）"
 
     if gemini_data:
         print("\n✓ 使用 Gemini 分析结果")
@@ -902,13 +1080,28 @@ def main():
         if gemini_data.get('title') and video_info:
             video_info['title'] = gemini_data['title']
     else:
-        # 7. 降级到纯正则字幕分析（最差情况，不再消耗API）
-        print("\n降级到纯本地匹配模式...")
+        # 7. 降级到本地切段 + 中文翻译润色
+        structure_mode = "本地切段 + Gemini 翻译润色"
+        print("\n降级到本地切段模式...")
         if not subtitles:
             print("解析字幕...")
             subtitles = parse_subtitles()
         print("\n提取段落信息...")
-        sections = extract_sections_from_subtitles(subtitles)
+        sections = extract_sections_from_subtitles(subtitles, chapters=chapters)
+
+        translated_data = translate_and_polish_sections(video_info, sections, chapters=chapters)
+        if translated_data:
+            print("\n✓ 使用降级后的中文翻译润色结果")
+            translated_sections = gemini_data_to_sections(translated_data)
+            if translated_sections:
+                sections = translated_sections
+            summary = translated_data.get('summary', '')
+            overall_advice = translated_data.get('overall_advice', '')
+            if translated_data.get('title'):
+                video_info['title'] = translated_data['title']
+        else:
+            structure_mode = "本地切段（未完成中文翻译润色）"
+            print("\n- 未能完成降级翻译润色，将保留原始切段内容")
 
     # 8. 生成HTML
     print("\n生成HTML文档...")
@@ -920,7 +1113,16 @@ def main():
 
     # 10. 发送邮件
     print("\n发送邮件...")
-    send_email(html_path, video_info['title'], video_url)
+    email_sent, email_recipient = send_email(html_path, video_info['title'], video_url)
+
+    print_run_summary(
+        structure_mode=structure_mode,
+        screenshot_mode=screenshot_mode,
+        chapters_detected=bool(chapters),
+        html_path=html_path,
+        email_sent=email_sent,
+        email_recipient=email_recipient,
+    )
 
     print("\n" + "=" * 60)
     print("✓ 完成！")

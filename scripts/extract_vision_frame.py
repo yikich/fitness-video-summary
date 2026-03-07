@@ -11,6 +11,32 @@ from pathlib import Path
 import json
 import base64
 
+SCRIPT_DIR = Path(__file__).parent
+ENV_FILE = SCRIPT_DIR.parent / ".env"
+
+
+def load_env_file(env_path):
+    """从本地 .env 文件加载环境变量（仅填充当前未设置的键）"""
+    if not env_path.exists():
+        return
+    try:
+        with open(env_path, 'r', encoding='utf-8') as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                    value = value[1:-1]
+                os.environ.setdefault(key, value)
+    except Exception:
+        pass
+
+
+load_env_file(ENV_FILE)
+
 def extract_frame(video_path, timestamp, output_path):
     """提取单帧"""
     cmd = [
@@ -49,40 +75,40 @@ def analyze_frame_with_vision(image_path, action_name):
   "reason": "评分理由"
 }}"""
 
-        # 调用 Claude 兼容视觉 API
+        # 调用 OpenAI Responses 兼容视觉 API
         payload = {
-            "model": "claude-opus-4-6",
-            "max_tokens": 500,
-            "messages": [{
+            "model": os.environ.get('VISION_MODEL', 'gpt-5.4'),
+            "input": [{
                 "role": "user",
                 "content": [
                     {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": image_data
-                        }
+                        "type": "input_text",
+                        "text": prompt
                     },
                     {
-                        "type": "text",
-                        "text": prompt
+                        "type": "input_image",
+                        "image_url": f"data:image/jpeg;base64,{image_data}"
                     }
                 ]
-            }]
+            }],
+            "max_output_tokens": 500
         }
 
         api_key = os.environ.get('VISION_API_KEY')
-        api_base = os.environ.get('VISION_API_BASE', 'https://your-vision-api.example.com')
+        api_base = os.environ.get('VISION_API_BASE', 'https://your-vision-api.example.com').rstrip('/')
         if not api_key:
             return False, 0, '未设置 VISION_API_KEY'
 
+        if api_base.endswith('/v1'):
+            responses_url = f'{api_base}/responses'
+        else:
+            responses_url = f'{api_base}/v1/responses'
+
         # 使用 curl 调用 API
         result = subprocess.run(
-            ['curl', '-s', f'{api_base}/v1/messages',
+            ['curl', '-s', responses_url,
              '-H', 'Content-Type: application/json',
-             '-H', f'x-api-key: {api_key}',
-             '-H', 'anthropic-version: 2023-06-01',
+             '-H', f'Authorization: Bearer {api_key}',
              '-d', json.dumps(payload)],
             capture_output=True,
             text=True,
@@ -93,11 +119,20 @@ def analyze_frame_with_vision(image_path, action_name):
             return False, 0, "API调用失败"
         
         response = json.loads(result.stdout)
-        content = response['content'][0]['text']
-        
+
+        # OpenAI Responses 兼容提取
+        content = ""
+        if isinstance(response.get('output'), list):
+            for item in response['output']:
+                for c in item.get('content', []):
+                    if c.get('type') in ('output_text', 'text') and c.get('text'):
+                        content += c['text']
+        if not content:
+            content = response.get('output_text', '') or response.get('text', '')
+
         # 提取 JSON
         import re
-        json_match = re.search(r'\{[^}]+\}', content, re.DOTALL)
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
         if json_match:
             analysis = json.loads(json_match.group())
             return (
@@ -105,8 +140,8 @@ def analyze_frame_with_vision(image_path, action_name):
                 analysis.get('score', 0),
                 analysis.get('description', '')
             )
-        
-        return False, 0, "解析失败"
+
+        return False, 0, f"解析失败: {content[:200]}"
         
     except Exception as e:
         print(f"      ⚠️  视觉分析失败: {e}")
@@ -135,7 +170,7 @@ def seconds_to_time(seconds):
         return f"{m:02d}:{s:06.3f}"
 
 def extract_best_frame_with_vision(video_path, base_timestamp, output_path, action_name,
-                                   offsets=[-10, -5, 0, 5, 10, 15, 20, 25, 30, 32, 35, 40, 45, 50, 55, 60]):
+                                   offsets=[-5, 0, 5, 10, 20, 30, 45]):
     """
     使用视觉分析提取最佳帧
     """
@@ -223,9 +258,9 @@ if __name__ == '__main__':
         try:
             offsets = [int(x) for x in sys.argv[5:]]
         except ValueError:
-            offsets = [-10, -5, 0, 5, 10, 15, 20, 25, 30, 32, 35, 40, 45, 50, 55, 60]
+            offsets = [-5, 0, 5, 10, 20, 30, 45]
     else:
-        offsets = [-10, -5, 0, 5, 10, 15, 20, 25, 30, 32, 35, 40, 45, 50, 55, 60]
+        offsets = [-5, 0, 5, 10, 20, 30, 45]
     
     success = extract_best_frame_with_vision(video_path, timestamp, output_path, action_name, offsets)
     sys.exit(0 if success else 1)
