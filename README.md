@@ -80,11 +80,18 @@ export VISION_API_KEY="your-api-key"
 export VISION_API_BASE="https://your-vision-api.example.com"
 ```
 
+If you want the generated HTML to be emailed automatically through macOS Mail, also set:
+
+```bash
+export SUMMARY_EMAIL_TO="your-email@example.com"
+```
+
 Notes:
 
 - `VISION_API_BASE` should point to a service compatible with the request format used in `scripts/extract_vision_frame.py`
 - If `VISION_API_KEY` is not set, the vision frame helper will fail and you should fall back to the other screenshot strategies
-- This repository does **not** include any real API credentials
+- If `SUMMARY_EMAIL_TO` is not set, the script will simply skip the email step
+- This repository does **not** include any real API credentials or built-in recipient address
 
 ## Usage
 
@@ -123,7 +130,7 @@ This keeps the repository safe to publish while still allowing users to plug in 
 
 ## Limitations
 
-- `send_email()` currently depends on macOS Mail + AppleScript
+- `send_email()` currently depends on macOS Mail + AppleScript and only runs when `SUMMARY_EMAIL_TO` is configured
 - Automatic subtitles may contain transcription errors
 - If Gemini quota is exhausted, fallback mode may produce lower-quality results
 - Screenshot quality still depends on video clarity, pacing, subtitle overlays, and the chosen frame selection strategy

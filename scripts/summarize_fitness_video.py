@@ -804,24 +804,26 @@ def save_html(html, video_title):
     return str(filepath)
 
 def send_email(html_path, video_title, video_url):
-    """通过macOS Mail发送邮件"""
-    print("正在发送邮件...")
+    """通过macOS Mail发送邮件（需配置 SUMMARY_EMAIL_TO）"""
+    recipient = os.environ.get('SUMMARY_EMAIL_TO', '').strip()
+    if not recipient:
+        print("- 未设置 SUMMARY_EMAIL_TO，跳过邮件发送")
+        return False
+
+    print(f"正在发送邮件到: {recipient}")
 
     applescript = f'''
 tell application "Mail"
-    set theMessage to make new outgoing message with properties {{subject:"健身视频总结 - {video_title}", content:"Hi Ryan,
+    set theMessage to make new outgoing message with properties {{subject:"健身视频总结 - {video_title}", content:"Hello,
 
-这是你请求的健身视频总结文档。
+Your fitness video summary is attached.
 
-视频链接：{video_url}
+Video URL: {video_url}
 
-文档已作为附件发送。
-
-Best,
-Nana", visible:false}}
+Best,\nNana", visible:false}}
 
     tell theMessage
-        make new to recipient at end of to recipients with properties {{address:"your-email@example.com"}}
+        make new to recipient at end of to recipients with properties {{address:"{recipient}"}}
         make new attachment with properties {{file name:POSIX file "{html_path}"}}
     end tell
 
